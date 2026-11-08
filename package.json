@@ -1,0 +1,11 @@
+{
+  "name": "webm-converter",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p public/vendor && cp -r node_modules/@ffmpeg/ffmpeg/dist/umd/. public/vendor/ && cp node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.js node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.wasm public/vendor/"
+  },
+  "dependencies": {
+    "@ffmpeg/core": "0.12.6",
+    "@ffmpeg/ffmpeg": "0.12.10"
+  }
+}

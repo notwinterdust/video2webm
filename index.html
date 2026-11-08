@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Convert video to WebM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#EDF1F2; --ink:#16232A; --muted:#55666E; --accent:#0B6B73; --on-accent:#fff; --line:#B9C6CB; --err:#A8281F; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#101A1F; --ink:#E6EEF0; --muted:#94A6AD; --accent:#4FC3CC; --on-accent:#08171A; --line:#2C3D44; --err:#FF8A80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:400 1rem/1.5 "Schibsted Grotesk", system-ui, sans-serif; }
+  main { max-width:34rem; margin:0 auto; padding:3rem 1.25rem 4rem; }
+  h1 { font-size:2.25rem; line-height:1.1; font-weight:800; letter-spacing:-0.02em; margin:0 0 .5rem; }
+  .lede { color:var(--muted); margin:0 0 2rem; }
+  .drop { display:block; border:2px dashed var(--line); border-radius:6px; padding:2rem 1.25rem; cursor:pointer; position:relative; }
+  .drop:hover, .drop.over, .drop:focus-within { border-color:var(--accent); }
+  .drop:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+  .drop input { position:absolute; opacity:0; inset:0; width:100%; height:100%; cursor:pointer; }
+  .drop strong { display:block; font-weight:600; overflow-wrap:anywhere; }
+  .drop span { color:var(--muted); font-size:.9rem; }
+  fieldset { border:0; padding:0; margin:1.75rem 0 0; }
+  legend, .field > span { font-weight:600; margin-bottom:.5rem; padding:0; display:block; }
+  .codecs { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+  .codec { border:1px solid var(--line); border-radius:6px; padding:.75rem .9rem; cursor:pointer; display:block; }
+  .codec:has(input:checked) { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+  .codec:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:2px; }
+  .codec input { accent-color:var(--accent); margin:0 .4rem 0 0; }
+  .codec b { font-weight:600; }
+  .codec small { display:block; color:var(--muted); margin-top:.25rem; line-height:1.35; }
+  .field { display:block; margin-top:1.5rem; }
+  select { font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:6px; padding:.5rem .6rem; width:100%; }
+  select:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  button { font:inherit; font-weight:600; margin-top:2rem; background:var(--accent); color:var(--on-accent); border:0; border-radius:6px; padding:.75rem 1.4rem; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  progress { display:block; width:100%; margin-top:1.5rem; accent-color:var(--accent); }
+  #status { margin:.75rem 0 0; min-height:1.5em; color:var(--muted); }
+  #status.error { color:var(--err); }
+  #result { margin-top:1.25rem; padding-top:1.25rem; border-top:1px solid var(--line); }
+  #result a { color:var(--accent); font-weight:600; }
+  #result p { margin:.25rem 0 0; color:var(--muted); }
+  @media (max-width:30rem) { .codecs { grid-template-columns:1fr; } h1 { font-size:1.8rem; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Convert video to WebM</h1>
+  <p class="lede">Conversion runs in your browser. Your video is never uploaded.</p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="video/*">
+    <strong id="name">Choose a video or drop it here</strong>
+    <span>MP4, MOV, MKV, AVI and most other formats</span>
+  </label>
+
+  <fieldset>
+    <legend>Video codec</legend>
+    <div class="codecs">
+      <label class="codec">
+        <input type="radio" name="codec" value="vp9" checked><b>VP9</b>
+        <small>Smaller files, slower to convert.</small>
+      </label>
+      <label class="codec">
+        <input type="radio" name="codec" value="vp8"><b>VP8</b>
+        <small>Faster to convert, plays on older devices.</small>
+      </label>
+    </div>
+  </fieldset>
+
+  <label class="field">
+    <span>Quality</span>
+    <select id="quality">
+      <option value="small">Smallest file</option>
+      <option value="balanced" selected>Balanced</option>
+      <option value="high">Highest quality</option>
+    </select>
+  </label>
+
+  <button id="go" disabled>Convert to WebM</button>
+  <progress id="bar" max="100" value="0" hidden></progress>
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <div id="result" hidden>
+    <a id="dl" download>Download</a>
+    <p id="sizes"></p>
+  </div>
+</main>
+
+<script src="/vendor/ffmpeg.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  const drop = $('drop'), input = $('file'), nameEl = $('name'), go = $('go'),
+        bar = $('bar'), statusEl = $('status'), result = $('result');
+  const fmt = b => b > 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(1) + ' MB';
+  const CRF = { vp9: { small: 40, balanced: 33, high: 27 }, vp8: { small: 20, balanced: 12, high: 6 } };
+
+  let file = null, outUrl = null, loaded = false, logs = [];
+  const ffmpeg = new FFmpegWASM.FFmpeg();
+  ffmpeg.on('log', ({ message }) => { logs.push(message); if (logs.length > 20) logs.shift(); });
+  ffmpeg.on('progress', ({ progress }) => {
+    if (progress >= 0 && progress <= 1) {
+      bar.value = Math.round(progress * 100);
+      statusEl.textContent = 'Converting… ' + bar.value + '%';
+    }
+  });
+
+  function setFile(f) {
+    if (!f) return;
+    file = f;
+    nameEl.textContent = f.name + ' (' + fmt(f.size) + ')';
+    go.disabled = false;
+    result.hidden = true;
+    statusEl.className = '';
+    statusEl.textContent = f.size > 1e9 ? 'This file is over 1 GB and may run out of browser memory.' : '';
+  }
+  input.addEventListener('change', () => setFile(input.files[0]));
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, () => drop.classList.remove('over')));
+  drop.addEventListener('drop', e => { e.preventDefault(); setFile(e.dataTransfer.files[0]); });
+
+  go.addEventListener('click', async () => {
+    if (!file) return;
+    go.disabled = true; result.hidden = true; bar.hidden = false; bar.value = 0;
+    statusEl.className = ''; logs = [];
+    const codec = document.querySelector('input[name=codec]:checked').value;
+    const q = $('quality').value;
+    try {
+      if (!loaded) {
+        statusEl.textContent = 'Loading converter…';
+        await ffmpeg.load({ coreURL: '/vendor/ffmpeg-core.js', wasmURL: '/vendor/ffmpeg-core.wasm' });
+        loaded = true;
+      }
+      const ext = (file.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
+      const inName = 'input.' + ext;
+      await ffmpeg.writeFile(inName, new Uint8Array(await file.arrayBuffer()));
+      statusEl.textContent = 'Converting… 0%';
+      const video = codec === 'vp9'
+        ? ['-c:v', 'libvpx-vp9', '-crf', String(CRF.vp9[q]), '-b:v', '0']
+        : ['-c:v', 'libvpx', '-crf', String(CRF.vp8[q]), '-b:v', '4M'];
+      const code = await ffmpeg.exec(['-i', inName, ...video,
+        '-deadline', 'realtime', '-cpu-used', '8', '-pix_fmt', 'yuv420p',
+        '-c:a', 'libopus', '-b:a', '128k', 'out.webm']);
+      if (code !== 0) throw new Error('ffmpeg exited with code ' + code);
+      const data = await ffmpeg.readFile('out.webm');
+      await ffmpeg.deleteFile(inName);
+      await ffmpeg.deleteFile('out.webm');
+
+      if (outUrl) URL.revokeObjectURL(outUrl);
+      outUrl = URL.createObjectURL(new Blob([data.buffer], { type: 'video/webm' }));
+      const base = file.name.replace(/\.[^.]+$/, '') || 'video';
+      $('dl').href = outUrl;
+      $('dl').download = base + '.webm';
+      $('dl').textContent = 'Download ' + base + '.webm';
+      $('sizes').textContent = 'Original ' + fmt(file.size) + ', WebM ' + fmt(data.length) + ' (' + codec.toUpperCase() + ')';
+      result.hidden = false;
+      statusEl.textContent = 'Done.';
+    } catch (err) {
+      statusEl.className = 'error';
+      statusEl.textContent = 'Conversion failed. ' + (logs.slice(-2).join(' ') || err.message);
+    } finally {
+      go.disabled = false; bar.hidden = true;
+    }
+  });
+</script>
+</body>
+</html>
