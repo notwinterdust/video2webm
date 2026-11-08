@@ -35,7 +35,7 @@
   .field { display:block; margin-top:1.5rem; }
   select { font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:6px; padding:.5rem .6rem; width:100%; }
   select:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-  button { font:inherit; font-weight:600; margin-top:2rem; background:var(--accent); color:var(--on-accent); border:0; border-radius:6px; padding:.75rem 1.4rem; cursor:pointer; }
+  button { font:inherit; width: 100%;font-weight:600; margin-top:2rem; background:var(--accent); color:var(--on-accent); border:0; border-radius:6px; padding:.75rem 1.4rem; cursor:pointer; }
   button:disabled { opacity:.45; cursor:not-allowed; }
   progress { display:block; width:100%; margin-top:1.5rem; accent-color:var(--accent); }
   #status { margin:.75rem 0 0; min-height:1.5em; color:var(--muted); }
@@ -77,6 +77,15 @@
       <option value="small">Smallest file</option>
       <option value="balanced" selected>Balanced</option>
       <option value="high">Highest quality</option>
+    </select>
+  </label>
+
+  <label class="field">
+    <span>Maximum resolution</span>
+    <select id="res">
+      <option value="720">720p</option>
+      <option value="1080" selected>1080p</option>
+      <option value="0">Original (4K may crash the browser)</option>
     </select>
   </label>
 
@@ -138,11 +147,13 @@
       const inName = 'input.' + ext;
       await ffmpeg.writeFile(inName, new Uint8Array(await file.arrayBuffer()));
       statusEl.textContent = 'Converting… 0%';
+      const maxH = $('res').value;
+      const scale = maxH === '0' ? [] : ['-vf', "scale=-2:'min(" + maxH + ",ih)'"];
       const video = codec === 'vp9'
         ? ['-c:v', 'libvpx-vp9', '-crf', String(CRF.vp9[q]), '-b:v', '0']
         : ['-c:v', 'libvpx', '-crf', String(CRF.vp8[q]), '-b:v', '4M'];
-      const code = await ffmpeg.exec(['-i', inName, ...video,
-        '-deadline', 'realtime', '-cpu-used', '8', '-pix_fmt', 'yuv420p',
+      const code = await ffmpeg.exec(['-i', inName, ...scale, ...video,
+        '-deadline', 'realtime', '-cpu-used', '8', '-lag-in-frames', '0', '-threads', '1', '-pix_fmt', 'yuv420p',
         '-c:a', 'libopus', '-b:a', '128k', 'out.webm']);
       if (code !== 0) throw new Error('ffmpeg exited with code ' + code);
       const data = await ffmpeg.readFile('out.webm');
@@ -159,8 +170,12 @@
       result.hidden = false;
       statusEl.textContent = 'Done.';
     } catch (err) {
+      // After a crash the wasm instance is unusable; reset it so the next try starts clean.
+      try { ffmpeg.terminate(); } catch (_) {}
+      loaded = false;
       statusEl.className = 'error';
-      statusEl.textContent = 'Conversion failed. ' + (logs.slice(-2).join(' ') || err.message);
+      statusEl.textContent = 'Conversion failed, most likely out of browser memory. Try a lower resolution or the VP8 codec. '
+        + '(' + (logs.slice(-1)[0] || err.message).trim() + ')';
     } finally {
       go.disabled = false; bar.hidden = true;
     }
